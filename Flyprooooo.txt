@@ -1,0 +1,236 @@
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- LocalPlayer 與角色資訊
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- 功能變數
+local flying = false
+local speed = 50
+local yVelocity = 0
+local uiMovable = false
+local trail = nil
+
+-- UI
+local screenGui, flyButton, speedBox, upButton, downButton, moveBtn
+local teleportGui, teleportContainer, teleportToggleBtn, teleportButtons = nil, nil, nil, {}
+
+-- 顏色池
+local colors = {
+    Color3.fromRGB(255,85,85),
+    Color3.fromRGB(85,170,255),
+    Color3.fromRGB(85,255,127),
+    Color3.fromRGB(255,170,0),
+    Color3.fromRGB(255,255,85),
+    Color3.fromRGB(170,85,255),
+    Color3.fromRGB(0,255,255),
+}
+
+-- 建立拖尾效果
+local function createTrail()
+    if trail then trail:Destroy() end
+
+    trail = Instance.new("Trail")
+    trail.Name = "FlyTrail"
+    trail.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.new(1,1,0)),
+        ColorSequenceKeypoint.new(1, Color3.new(1,0,0))
+    }
+    trail.LightEmission = 1
+    trail.Lifetime = 0.4
+    trail.MinLength = 0.1
+    trail.Transparency = NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 1)
+    }
+    trail.Attachment0 = Instance.new("Attachment", hrp)
+    trail.Attachment1 = Instance.new("Attachment", hrp)
+    trail.Attachment1.Position = Vector3.new(0, 0, 2)
+    trail.Parent = hrp
+end
+
+-- 清除所有特效與 UI
+local function clearAll()
+    flying = false
+    yVelocity = 0
+    humanoid.PlatformStand = false
+    if trail then trail:Destroy(); trail = nil end
+    if screenGui then screenGui:Destroy() end
+    if teleportGui then teleportGui:Destroy() end
+end
+
+-- 建立飛行 UI
+local function createFlyUI()
+    clearAll()
+    screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+    screenGui.Name = "FlyUI"
+    screenGui.ResetOnSpawn = false
+
+    flyButton = Instance.new("TextButton", screenGui)
+    flyButton.Size, flyButton.Position = UDim2.new(0,100,0,50), UDim2.new(0.5,-50,0.7,0)
+    flyButton.Text, flyButton.BackgroundColor3 = "飛行", Color3.fromRGB(60,60,60)
+
+    speedBox = Instance.new("TextBox", screenGui)
+    speedBox.Size, speedBox.Position = UDim2.new(0,120,0,40), UDim2.new(0.5,-60,0.8,0)
+    speedBox.Text, speedBox.PlaceholderText = tostring(speed), "速度（≥0）"
+    speedBox.ClearTextOnFocus = false
+    speedBox.BackgroundColor3 = Color3.fromRGB(60,60,60)
+
+    upButton = Instance.new("TextButton", screenGui)
+    downButton = Instance.new("TextButton", screenGui)
+    upButton.Size, downButton.Size = UDim2.new(0,80,0,40), UDim2.new(0,80,0,40)
+    upButton.Position = UDim2.new(0.35,0,0.9,0)
+    downButton.Position = UDim2.new(0.65,0,0.9,0)
+    upButton.Text, downButton.Text = "UP", "DOWN"
+    upButton.BackgroundColor3 = Color3.fromRGB(85,170,255)
+    downButton.BackgroundColor3 = Color3.fromRGB(255,85,85)
+
+    moveBtn = Instance.new("TextButton", screenGui)
+    moveBtn.Size, moveBtn.Position = UDim2.new(0,50,0,50), UDim2.new(0.9,-25,0.85,0)
+    moveBtn.Text, moveBtn.BackgroundColor3 = "✦", Color3.fromRGB(255,0,0)
+    moveBtn.TextScaled, moveBtn.AutoButtonColor = true, false
+
+    moveBtn.MouseButton1Click:Connect(function()
+        uiMovable = not uiMovable
+        moveBtn.BackgroundColor3 = uiMovable and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
+    end)
+
+    local dragging, startPos, dragStart = false, {}, Vector2.new()
+    local function beginDrag(input)
+        if uiMovable and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+            dragging = true
+            dragStart = input.Position
+            startPos = {
+                flyButton = flyButton.Position,
+                speedBox = speedBox.Position,
+                upButton = upButton.Position,
+                downButton = downButton.Position,
+                moveBtn = moveBtn.Position
+            }
+        end
+    end
+    local function updateDrag(input)
+        if dragging then
+            local delta = input.Position - dragStart
+            flyButton.Position = startPos.flyButton + UDim2.new(0,delta.X,0,delta.Y)
+            speedBox.Position = startPos.speedBox + UDim2.new(0,delta.X,0,delta.Y)
+            upButton.Position = startPos.upButton + UDim2.new(0,delta.X,0,delta.Y)
+            downButton.Position = startPos.downButton + UDim2.new(0,delta.X,0,delta.Y)
+            moveBtn.Position = startPos.moveBtn + UDim2.new(0,delta.X,0,delta.Y)
+        end
+    end
+    UserInputService.InputBegan:Connect(beginDrag)
+    UserInputService.InputChanged:Connect(updateDrag)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputState == Enum.UserInputState.End then dragging = false end
+    end)
+
+    flyButton.MouseButton1Click:Connect(function()
+        flying = not flying
+        humanoid.PlatformStand = flying
+        flyButton.BackgroundColor3 = flying and Color3.fromRGB(0,255,0) or Color3.fromRGB(60,60,60)
+        flyButton.Text = flying and "停止" or "飛行"
+        if flying then createTrail() else if trail then trail:Destroy(); trail = nil end end
+    end)
+    speedBox.FocusLost:Connect(function(enter)
+        if enter then
+            local n = tonumber(speedBox.Text)
+            speed = (n and n>=0) and n or speed
+            speedBox.Text = tostring(speed)
+        end
+    end)
+    upButton.MouseButton1Down:Connect(function() if flying then yVelocity = speed end end)
+    upButton.MouseButton1Up:Connect(function() yVelocity = 0 end)
+    downButton.MouseButton1Down:Connect(function() if flying then yVelocity = -speed end end)
+    downButton.MouseButton1Up:Connect(function() yVelocity = 0 end)
+end
+
+-- 建立玩家傳送 UI
+local function createTeleportUI()
+    if teleportGui then teleportGui:Destroy() end
+
+    teleportGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+    teleportGui.Name = "TeleportUI"
+    teleportGui.ResetOnSpawn = false
+
+    teleportContainer = Instance.new("Frame", teleportGui)
+    teleportContainer.Size = UDim2.new(0,150,0,40)
+    teleportContainer.Position = UDim2.new(0.8,0,0.2,0)
+    teleportContainer.BackgroundTransparency = 0.2
+    teleportContainer.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    teleportContainer.Active, teleportContainer.Draggable = true, true
+
+    teleportToggleBtn = Instance.new("TextButton", teleportContainer)
+    teleportToggleBtn.Size = UDim2.new(1,0,0,40)
+    teleportToggleBtn.Position = UDim2.new(0,0,0,0)
+    teleportToggleBtn.Text = "玩家列表 ▼"
+    teleportToggleBtn.TextColor3 = Color3.new(1,1,1)
+    teleportToggleBtn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+
+    local buttonContainer = Instance.new("Frame", teleportContainer)
+    buttonContainer.Position = UDim2.new(0,0,0,40)
+    buttonContainer.Size = UDim2.new(1,0,0,0)
+    buttonContainer.BackgroundTransparency = 1
+    buttonContainer.ClipsDescendants = true
+
+    local layout = Instance.new("UIListLayout", buttonContainer)
+    layout.Padding = UDim.new(0,5)
+
+    local open = false
+    teleportToggleBtn.MouseButton1Click:Connect(function()
+        open = not open
+        teleportToggleBtn.Text = open and "玩家列表 ▲" or "玩家列表 ▼"
+        buttonContainer.Size = open and UDim2.new(1,0,0,#teleportButtons*35) or UDim2.new(1,0,0,0)
+    end)
+
+    teleportButtons = {}
+    local function tp(player2)
+        if player2.Character and player2.Character:FindFirstChild("HumanoidRootPart") then
+            hrp.CFrame = player2.Character.HumanoidRootPart.CFrame * CFrame.new(0,0,-3)
+        end
+    end
+
+    for i, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            local btn = Instance.new("TextButton", buttonContainer)
+            btn.Text, btn.Size = plr.Name, UDim2.new(1,-10,0,30)
+            btn.BackgroundColor3 = colors[(i % #colors) + 1]
+            btn.TextColor3 = Color3.new(1,1,1)
+            btn.Font = Enum.Font.SourceSansBold
+            btn.TextSize = 18
+            btn.AutoButtonColor = true
+            btn.MouseButton1Click:Connect(function() tp(plr) end)
+            table.insert(teleportButtons, btn)
+        end
+    end
+end
+
+-- 每幀更新飛行
+RunService.RenderStepped:Connect(function()
+    if flying then
+        local cam = workspace.CurrentCamera.CFrame
+        local vec = humanoid.MoveDirection
+        local moveVec = Vector3.new(cam.LookVector.X,0,cam.LookVector.Z).Unit * vec.Z * speed +
+                        Vector3.new(cam.RightVector.X,0,cam.RightVector.Z).Unit * vec.X * speed
+        hrp.Velocity = moveVec + Vector3.new(0,yVelocity,0)
+    end
+end)
+
+-- 初始化與重建
+local function onCharAdded(char)
+    character = char
+    hrp = char:WaitForChild("HumanoidRootPart")
+    humanoid = char:WaitForChild("Humanoid")
+    clearAll()
+    createFlyUI()
+    createTeleportUI()
+end
+
+player.CharacterAdded:Connect(onCharAdded)
+createFlyUI()
+createTeleportUI()
